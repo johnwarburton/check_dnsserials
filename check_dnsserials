@@ -34,6 +34,7 @@ COMMAND_DIG="$(command -v "${COMMAND_DIG:-dig}")"
 # avoid problems with the package-manager
 for script in \
 	"${PROGPATH}/utils.sh" \
+	/usr/local/nagios/libexec/utils.sh \
 	/usr/lib/nagios/plugins/utils.sh \
 	/usr/lib/monitoring-plugins/utils.sh \
 	; do
@@ -55,12 +56,13 @@ verbose(){ [ "${verbose}" -lt 1 ] || printf '%s\n' "${@}"; }
 
 usage(){
 	cat <<-FIN
-	usage: ${PROGNAME} -d DOMAIN [-H DNS-MASTER] [-S DNS-SLAVES] [ -s SOA-SERIAL] [-w FAILS] [-c FAILS] [ -h -v ]
+	usage: ${PROGNAME} -d DOMAIN [-H DNS-MASTER] [-S DNS-SLAVES] [ -s SOA-SERIAL] [-w FAILS] [-c FAILS] [-t TOLERANCE ] [ -h -v ]
 
 	DNS-MASTER: The master to get all main informations from
 	DNS-SLAVES: The slaves to compare with the master's serial
 	SOA-SERIAL: The serial number used to compare all DNS slaves (not recommended to set)
 	FAILS: The amount of DNS servers allowed having another serial (=> amount of dns servers not in sync) (defaults to 0)
+	TOLERANCE: The acceptable difference secondary serial numbers can be behind master. Useful for DDNS sites with a lot of devices
 
 	If any of DNS-MASTER, DNS-SLAVES or SOA-SERIAL is unset, it'll get queried from the DNS system.
 	FIN
@@ -71,10 +73,11 @@ master=""
 serial=""
 verbose=0
 fails=0
+tolerance=0
 state="${STATE_UNKNOWN}"
 failedServers=()
 
-while getopts ":vhd:H:S:s:c:w:" opt; do
+while getopts ":vhd:H:S:s:c:w:t:" opt; do
 	case "${opt}" in
 		v)
 			verbose=$((verbose + 1))
@@ -100,6 +103,9 @@ while getopts ":vhd:H:S:s:c:w:" opt; do
 		w)
 			warn="${OPTARG}"
 			;;
+		t)
+			tolerance="${OPTARG}"
+			;;
 		\?)
 			error "Invalid option: -${OPTARG}" \
 				"Use '-h' to acquire usage output."
@@ -123,6 +129,8 @@ verbose "Domain ${domain}"
 	|| error "Warning value has to be positive."
 [ -z "${warn}" ] || [ -z "${crit}" ] || [ "${warn}" -le "${crit}" ] \
 	|| error "Warning value has to be lower than critical."
+[ -z "${tolerance}" ] || [ "${tolerance}" -ge 0 ] \
+	|| error "Tolerance value has to be positive."
 
 # if no master given, use the standard DNS to determine the master
 if [ -z "${master}" ]; then
@@ -158,10 +166,26 @@ for server in ${slaves}; do
 	if [ "x${serial_slave}" = "x${serial}" ]; then
 		verbose "OK:  ${domain} ${server} ${serial}"
 		else
-			verbose "BAD: ${domain} ${server} ${serial_slave}"
-			fails=$((fails + 1))
-			failedServers+=(${server})
-			debug "Incrementing failed states to ${fails}"
+                        if [ -n "${tolerance}" ]; then
+			        if [ $((${serial} - ${serial_slave})) -lt 0 ]; then
+			                verbose "CRITIAL: ${domain} ${server} ${serial} < ${serial_slave}"
+			                fails=$((fails + 1))
+			                failedServers+=(${server})
+			                debug "Incrementing failed states to ${fails}"
+			        elif [ $((${serial} - ${serial_slave})) -gt ${tolerance} ]; then
+			                verbose "BAD: ${domain} ${server} ${serial} - ${serial_slave} > ${tolerance}"
+			                fails=$((fails + 1))
+			                failedServers+=(${server})
+			                debug "Incrementing failed states to ${fails}"
+				else
+		                        verbose "OK:  ${domain} ${server} ${serial} - ${serial_slave} < ${tolerance}"
+				fi
+                        else
+			        verbose "BAD: ${domain} ${server} ${serial_slave}"
+			        fails=$((fails + 1))
+			        failedServers+=(${server})
+			        debug "Incrementing failed states to ${fails}"
+                        fi
 	fi
 done
 
