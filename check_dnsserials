@@ -25,7 +25,7 @@
 export PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
 PROGNAME="$(basename "${0}")"
 PROGPATH="$(sed -e 's,[\\/][^\\/][^\\/]*$,,' <<< "${0}")"
-REVISION="1.1.0"
+REVISION="1.2.1"
 COMMAND_DIG="$(command -v "${COMMAND_DIG:-dig}")"
 
 # source a utils.sh from nagios-plugins
@@ -129,7 +129,7 @@ verbose "Domain ${domain}"
 	|| error "Warning value has to be positive."
 [ -z "${warn}" ] || [ -z "${crit}" ] || [ "${warn}" -le "${crit}" ] \
 	|| error "Warning value has to be lower than critical."
-[ -z "${tolerance}" ] || [ "${tolerance}" -ge 0 ] \
+[ -z "${tolerance}" ] || [ "${tolerance}" -gt 0 ] \
 	|| error "Tolerance value has to be positive."
 
 # if no master given, use the standard DNS to determine the master
@@ -166,26 +166,26 @@ for server in ${slaves}; do
 	if [ "x${serial_slave}" = "x${serial}" ]; then
 		verbose "OK:  ${domain} ${server} ${serial}"
 		else
-                        if [ -n "${tolerance}" ]; then
-			        if [ $((${serial} - ${serial_slave})) -lt 0 ]; then
-			                verbose "CRITIAL: ${domain} ${server} ${serial} < ${serial_slave}"
-			                fails=$((fails + 1))
-			                failedServers+=(${server})
-			                debug "Incrementing failed states to ${fails}"
-			        elif [ $((${serial} - ${serial_slave})) -gt ${tolerance} ]; then
-			                verbose "BAD: ${domain} ${server} ${serial} - ${serial_slave} > ${tolerance}"
-			                fails=$((fails + 1))
-			                failedServers+=(${server})
-			                debug "Incrementing failed states to ${fails}"
+			if [[ ${tolerance} -gt 0 ]]; then
+				if [ $((${serial} - ${serial_slave})) -lt 0 ]; then
+					verbose "CRITIAL: ${domain} ${server} ${serial} < ${serial_slave}"
+					fails=$((fails + 1))
+					failedServers+=(${server})
+					debug "Incrementing failed states to ${fails}"
+				elif [ $((${serial} - ${serial_slave})) -gt ${tolerance} ]; then
+					verbose "BAD: ${domain} ${server} ${serial} - ${serial_slave} > ${tolerance}"
+					fails=$((fails + 1))
+					failedServers+=(${server})
+					debug "Incrementing failed states to ${fails}"
 				else
-		                        verbose "OK:  ${domain} ${server} ${serial} - ${serial_slave} < ${tolerance}"
+					verbose "OK:  ${domain} ${server} ${serial} - ${serial_slave} < ${tolerance}"
 				fi
-                        else
-			        verbose "BAD: ${domain} ${server} ${serial_slave}"
-			        fails=$((fails + 1))
-			        failedServers+=(${server})
-			        debug "Incrementing failed states to ${fails}"
-                        fi
+			else
+				verbose "BAD: ${domain} ${server} ${serial_slave}"
+				fails=$((fails + 1))
+				failedServers+=(${server})
+				debug "Incrementing failed states to ${fails}"
+			fi
 	fi
 done
 
